@@ -1,0 +1,15 @@
+name = "diffeq-gui-app"
+uuid = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"  # Replace with a unique UUID for your project
+version = "0.1.0"
+
+[deps]
+Gtk = "c3e4b0f8-1c4e-5c6e-8c2b-1c1b4e5e1c3e"
+DifferentialEquations = "b993b5d9-1c3e-5c6e-8c2b-1c1b4e5e1c3e"
+Plots = "91a5bcdd-55d7-5c6e-8c2b-1c1b4e5e1c3e"
+Lux = "c4c5c3e4-1c4e-5c6e-8c2b-1c1b4e5e1c3e"
+Zygote = "e88e6eb3-1c4e-5c6e-8c2b-1c1b4e5e1c3e"
+MLJ = "c7e460c6-1c4e-5c6e-8c2b-1c1b4e5e1c3e"
+DataFrames = "a93c6f00-1c4e-5c6e-8c2b-1c1b4e5e1c3e"
+
+[extras]
+```
