@@ -3,7 +3,7 @@ module Enzymes
 
 using OrdinaryDiffEq, StableRNGs
 
-export enzymes!, run_simulation, default_params, default_u0, default_tspan
+export enzymes!, run_simulation, get_problem, default_params, default_u0, default_tspan
 
 # ODE system
 default_u0 = [0.0, 0.0, 0.0, 0.0]
@@ -16,6 +16,10 @@ function enzymes!(du, u, p, t)
     du[2] = c * u[1] - d0 * u[2] - s1 * u[2] + k * u[3]
     du[3] = s1 * u[2] - k * u[3] - d1 * u[3] - s2 * u[3] + k * u[4]
     du[4] = s2 * u[3] - k * u[4] - d2 * u[4]
+end
+
+function get_problem(u0::Vector{<:Real}=default_u0, p::Vector{<:Real}=default_params, tspan::Tuple=default_tspan)
+    ODEProblem(enzymes!, u0, tspan, p)
 end
 
 function run_simulation(u0::Vector{<:Real}=default_u0, p::Vector{<:Real}=default_params, tspan::Tuple=default_tspan)
