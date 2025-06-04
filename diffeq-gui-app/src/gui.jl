@@ -1,11 +1,14 @@
 using GLMakie
 using GLMakie: Menu, Button, Slider, Label, DataAspect, colsize!, GridLayout, xlims!, ylims!
+using OrdinaryDiffEq
 include("enzymes.jl")
 include("logistic.jl")
 include("lotkavolterra.jl")
+include("robertson.jl")
 using .Enzymes
 using .LogisticODE
 using .LotkaVolterraODE
+using .RobertsonODE
 
 dict_odes = Dict(
     "Enzymes" => (
@@ -41,6 +44,14 @@ dict_odes = Dict(
         default_tspan = LotkaVolterraODE.default_tspan,
         param_labels = LotkaVolterraODE.param_labels,
         param_explanations = LotkaVolterraODE.param_explanations
+    ),
+    "Robertson" => (
+        get_problem = (u0, p, tspan) -> RobertsonODE.get_problem(u0, p, tspan),
+        default_u0 = RobertsonODE.default_u0,
+        default_params = RobertsonODE.default_params,
+        default_tspan = RobertsonODE.default_tspan,
+        param_labels = RobertsonODE.param_labels,
+        param_explanations = RobertsonODE.param_explanations
     )
 )
 
@@ -114,46 +125,189 @@ function gui_app()
     # Initial plot
     sol = dict_odes[ode_names[1]].get_problem(params[], params[], dict_odes[ode_names[1]].default_tspan)
     sol = solve(sol)
-    # Clear previous lines (Makie 0.22: use empty!(ax) to clear axis)
     empty!(ax)
-    if isa(sol.u[1], AbstractArray)
-        for i in 1:length(sol.u[1])
-            lines!(ax, sol.t, [u[i] for u in sol.u], label = "u$i")
+    if length(sol.u) > 0
+        if isa(sol.u[1], AbstractArray)
+            try
+                arr = reduce(hcat, sol.u)
+                if ode_names[1] == "Robertson"
+                    ax.yscale[] = log10
+                    any_positive = false
+                    global_ymin = Inf
+                    global_ymax = -Inf
+                    for i in 1:size(arr, 1)
+                        yvals = arr[i, :]
+                        pos_mask = yvals .> 0
+                        if any(pos_mask)
+                            any_positive = true
+                            yvals_pos = yvals[pos_mask]
+                            t_pos = sol.t[pos_mask]
+                            global_ymin = min(global_ymin, minimum(yvals_pos))
+                            global_ymax = max(global_ymax, maximum(yvals_pos))
+                            lines!(ax, t_pos, yvals_pos, label = "u$i")
+                        end
+                    end
+                    if any_positive
+                        ymin = max(global_ymin, 1e-16)
+                        ymax = global_ymax
+                        ax.ylims[] = (ymin, ymax * 1.05)
+                    else
+                        ax.ylims[] = (1e-16, 1.0)
+                    end
+                    ax.yticks = 10.0 .^ (-16:0)
+                    ax.ylabel = "Concentration"
+                    ax.ygridvisible = true
+                else
+                    for i in 1:size(arr, 1)
+                        yvals = arr[i, :]
+                        if length(sol.t) == length(yvals) && eltype(yvals) <: Number
+                            lines!(ax, sol.t, collect(yvals), label = "u$i")
+                        end
+                    end
+                    ax.yscale[] = identity
+                    ypad = dict_odes[ode_names[1]].default_tspan[2] - dict_odes[ode_names[1]].default_tspan[1]
+                    ycenter = 0.5 * (maximum(vcat(sol.u...)) + minimum(vcat(sol.u...)))
+                    ax.ylims[] = (ycenter - ypad/2, ycenter + ypad/2)
+                end
+            catch err
+                @warn "Error plotting ODE solution (matrix/array case)" exception=err
+            end
+        elseif eltype(sol.u) <: Number
+            try
+                if length(sol.t) == length(sol.u)
+                    if ode_names[1] == "Robertson"
+                        ax.yscale[] = log10
+                        pos_mask = sol.u .> 0
+                        if any(pos_mask)
+                            t_pos = sol.t[pos_mask]
+                            u_pos = sol.u[pos_mask]
+                            lines!(ax, t_pos, u_pos, label = "u")
+                            ymin = max(minimum(u_pos), 1e-16)
+                            ymax = maximum(u_pos)
+                            ax.ylims[] = (ymin, ymax * 1.05)
+                        else
+                            ax.ylims[] = (1e-16, 1.0)
+                        end
+                        ax.yticks = 10.0 .^ (-16:0)
+                        ax.ylabel = "Concentration"
+                        ax.ygridvisible = true
+                    else
+                        lines!(ax, sol.t, sol.u, label = "u")
+                        ax.yscale[] = identity
+                        ypad = dict_odes[ode_names[1]].default_tspan[2] - dict_odes[ode_names[1]].default_tspan[1]
+                        ycenter = 0.5 * (maximum(sol.u) + minimum(sol.u))
+                        ax.ylims[] = (ycenter - ypad/2, ycenter + ypad/2)
+                    end
+                end
+            catch err
+                @warn "Error plotting ODE solution (vector case)" exception=err
+            end
+        else
+            @warn "Unrecognized ODE solution type for plotting" typeof_sol_u=typeof(sol.u)
         end
-    else
-        lines!(ax, sol.t, sol.u, label = "u")
     end
-    GLMakie.xlims!(ax, dict_odes[ode_names[1]].default_tspan)
-    ypad = dict_odes[ode_names[1]].default_tspan[2] - dict_odes[ode_names[1]].default_tspan[1]
-    ycenter = 0.5 * (maximum(vcat(sol.u...)) + minimum(vcat(sol.u...)))
-    GLMakie.ylims!(ax, ycenter - ypad/2, ycenter + ypad/2)
+    # Set x-limits using xlims! (unpack tuple)
+    xlims!(ax, dict_odes[ode_names[1]].default_tspan...)
 
     # Update plot on button press
     on(btn.clicks) do _
         sol = dict_odes[ode_select.selection[]].get_problem(params[], params[], dict_odes[ode_select.selection[]].default_tspan)
         sol = solve(sol)
         empty!(ax)
-        if isa(sol.u[1], AbstractArray)
-            for i in 1:length(sol.u[1])
-                lines!(ax, sol.t, [u[i] for u in sol.u], label = "u$i")
+        if length(sol.u) > 0
+            if isa(sol.u[1], AbstractArray)
+                try
+                    arr = reduce(hcat, sol.u)
+                    if ode_select.selection[] == "Robertson"
+                        ax.yscale[] = log10
+                        any_positive = false
+                        global_ymin = Inf
+                        global_ymax = -Inf
+                        for i in 1:size(arr, 1)
+                            yvals = arr[i, :]
+                            pos_mask = yvals .> 0
+                            if any(pos_mask)
+                                any_positive = true
+                                yvals_pos = yvals[pos_mask]
+                                t_pos = sol.t[pos_mask]
+                                global_ymin = min(global_ymin, minimum(yvals_pos))
+                                global_ymax = max(global_ymax, maximum(yvals_pos))
+                                lines!(ax, t_pos, yvals_pos, label = "u$i")
+                            end
+                        end
+                        if any_positive
+                            ymin = max(global_ymin, 1e-16)
+                            ymax = global_ymax
+                            ax.ylims[] = (ymin, ymax * 1.05)
+                        else
+                            ax.ylims[] = (1e-16, 1.0)
+                        end
+                        ax.yticks = 10.0 .^ (-16:0)
+                        ax.ylabel = "Concentration"
+                        ax.ygridvisible = true
+                    else
+                        for i in 1:size(arr, 1)
+                            yvals = arr[i, :]
+                            if length(sol.t) == length(yvals) && eltype(yvals) <: Number
+                                lines!(ax, sol.t, collect(yvals), label = "u$i")
+                            end
+                        end
+                        ax.yscale[] = identity
+                        ypad = dict_odes[ode_select.selection[]].default_tspan[2] - dict_odes[ode_select.selection[]].default_tspan[1]
+                        ycenter = 0.5 * (maximum(vcat(sol.u...)) + minimum(vcat(sol.u...)))
+                        ax.ylims[] = (ycenter - ypad/2, ycenter + ypad/2)
+                    end
+                catch err
+                @warn "Error plotting ODE solution (matrix/array case)" exception=err
+                end
+            elseif eltype(sol.u) <: Number
+                try
+                    if length(sol.t) == length(sol.u)
+                        if ode_names[1] == "Robertson"
+                            ax.yscale[] = log10
+                            pos_mask = sol.u .> 0
+                            if any(pos_mask)
+                                t_pos = sol.t[pos_mask]
+                                u_pos = sol.u[pos_mask]
+                                lines!(ax, t_pos, u_pos, label = "u")
+                                ymin = max(minimum(u_pos), 1e-16)
+                                ymax = maximum(u_pos)
+                                ax.ylims[] = (ymin, ymax * 1.05)
+                            else
+                                ax.ylims[] = (1e-16, 1.0)
+                            end
+                            ax.yticks = 10.0 .^ (-16:0)
+                            ax.ylabel = "Concentration"
+                            ax.ygridvisible = true
+                        else
+                            lines!(ax, sol.t, sol.u, label = "u")
+                            ax.yscale[] = identity
+                            ypad = dict_odes[ode_select.selection[]].default_tspan[2] - dict_odes[ode_select.selection[]].default_tspan[1]
+                            ycenter = 0.5 * (maximum(sol.u) + minimum(sol.u))
+                            ax.ylims[] = (ycenter - ypad/2, ycenter + ypad/2)
+                        end
+                    end
+                catch err
+                    @warn "Error plotting ODE solution (vector case)" exception=err
+                end
+            else
+                @warn "Unrecognized ODE solution type for plotting" typeof_sol_u=typeof(sol.u)
             end
-        else
-            lines!(ax, sol.t, sol.u, label = "u")
         end
-        GLMakie.xlims!(ax, dict_odes[ode_select.selection[]].default_tspan)
-        ypad = dict_odes[ode_select.selection[]].default_tspan[2] - dict_odes[ode_select.selection[]].default_tspan[1]
-        ycenter = 0.5 * (maximum(vcat(sol.u...)) + minimum(vcat(sol.u...)))
-        GLMakie.ylims!(ax, ycenter - ypad/2, ycenter + ypad/2)
+        # Set x-limits using xlims! (unpack tuple)
+        xlims!(ax, dict_odes[ode_select.selection[]].default_tspan...)
     end
 
     # Update everything when ODE system is changed
     on(ode_select.selection) do name
         ode = dict_odes[name]
         # Update sliders and labels
-        for i in 1:length(ode.default_params)
-            sliders[i].value[] = ode.default_params[i]
-            slider_labels[i].text[] = ode.param_labels[i]
-            explanation_labels[i].text[] = ode.param_explanations[i]
+        for i in 1:length(sliders)
+            if i <= length(ode.default_params)
+                sliders[i].value[] = ode.default_params[i]
+            end
+            slider_labels[i].text[] = i <= length(ode.param_labels) ? ode.param_labels[i] : ""
+            explanation_labels[i].text[] = i <= length(ode.param_explanations) ? ode.param_explanations[i] : ""
         end
         # Hide unused sliders/labels if system has fewer params
         for i in (length(ode.default_params)+1):maxparams
@@ -201,7 +355,6 @@ function gui_app()
         sol = ode.get_problem(params[], params[], ode.default_tspan)
         sol = solve(sol)
         empty!(ax)
-        # Defensive: handle empty solution and avoid passing ODESolution to lines!
         if length(sol.u) > 0
             if isa(sol.u[1], AbstractArray)
                 try
@@ -211,6 +364,40 @@ function gui_app()
                         if length(sol.t) == length(yvals) && eltype(yvals) <: Number
                             lines!(ax, sol.t, collect(yvals), label = "u$i")
                         end
+                    end
+                    if ode_select.selection[] == "Robertson"
+                        ax.yscale[] = log10
+                        any_positive = false
+                        global_ymin = Inf
+                        global_ymax = -Inf
+                        for i in 1:size(arr, 1)
+                            yvals = arr[i, :]
+                            pos_mask = yvals .> 0
+                            if any(pos_mask)
+                                any_positive = true
+                                yvals_pos = yvals[pos_mask]
+                                t_pos = sol.t[pos_mask]
+                                global_ymin = min(global_ymin, minimum(yvals_pos))
+                                global_ymax = max(global_ymax, maximum(yvals_pos))
+                                lines!(ax, t_pos, yvals_pos, label = "u$i")
+                            end
+                        end
+                        if any_positive
+                            ymin = max(global_ymin, 1e-16)
+                            ymax = global_ymax
+                            ax.ylims[] = (ymin, ymax * 1.05)
+                        else
+                            ax.ylims[] = (1e-16, 1.0)
+                        end
+                        ax.yticks = 10.0 .^ (-16:0)
+                        ax.ylabel = "Concentration"
+                        ax.ygridvisible = true
+                    else
+                        ax.yscale[] = identity
+                        # For non-Robertson, set ypad/ycenter/ylims
+                        ypad = dict_odes[ode_select.selection[]].default_tspan[2] - dict_odes[ode_select.selection[]].default_tspan[1]
+                        ycenter = 0.5 * (maximum(vcat(sol.u...)) + minimum(vcat(sol.u...)))
+                        ax.ylims[] = (ycenter - ypad/2, ycenter + ypad/2)
                     end
                 catch err
                     @warn "Error plotting ODE solution (matrix/array case)" exception=err
@@ -227,13 +414,29 @@ function gui_app()
                 @warn "Unrecognized ODE solution type for plotting" typeof_sol_u=typeof(sol.u)
             end
         end
-        GLMakie.xlims!(ax, ode.default_tspan)
-        ypad = ode.default_tspan[2] - ode.default_tspan[1]
-        ycenter = 0.5 * (maximum(vcat(sol.u...)) + minimum(vcat(sol.u...)))
-        GLMakie.ylims!(ax, ycenter - ypad/2, ycenter + ypad/2)
+        # Set x-limits using xlims! (unpack tuple)
+        xlims!(ax, dict_odes[ode_select.selection[]].default_tspan...)
     end
 
-    fig
+    # Resize handling: update plot aspect ratio and sizes
+    on(fig.scene.px_area) do _
+        # Maintain aspect ratio of 1:1 for the plot
+        aspect_ratio = 1.0
+        width, height = fig.scene.px_area[]
+        if height > 0
+            new_width = height * aspect_ratio
+            if new_width <= width
+                fig[1, 2].width = new_width
+                fig[1, 1].width = width - new_width
+            else
+                fig[1, 1].width = width
+                fig[1, 2].width = height / aspect_ratio
+            end
+        end
+    end
+
+    return fig
 end
 
-gui_app()
+# To run the GUI app, uncomment the following line:
+ gui_app()
